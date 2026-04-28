@@ -188,7 +188,8 @@ export default function App() {
       savePersist({ hostUrl, network, setupTxid: txid, setupOutputCount: count, satoshisPerOutput: satsEach, nextVout: 0 })
 
       addLog({ type: 'setup', txid, status: result.txStatus ?? 'BROADCAST', msg: `Setup tx · ${count} outputs` })
-      setSetupStatus('Broadcast OK — waiting for SEEN_ON_NETWORK…')
+      setSetupStatus(`Ready — ${count} outputs available`)
+      setPhase('ready')
 
       openSSE(arcUrl, callbackToken, txid, count)
     } catch (err) {
@@ -205,8 +206,7 @@ export default function App() {
     try {
       es = new EventSource(`${arcUrl}/events?callbackToken=${encodeURIComponent(callbackToken)}`)
     } catch {
-      setSetupStatus('SSE unavailable — tx submitted. Enable blast manually if confirmed.')
-      setPhase('ready')
+      setSetupStatus('SSE unavailable — status updates disabled.')
       return
     }
 
@@ -219,24 +219,21 @@ export default function App() {
         addLog({ type: 'setup', txid: data.txid ?? expectedTxid, status })
         setSetupStatus(`Status: ${status}`)
         if (status === 'SEEN_ON_NETWORK' || status === 'MINED') {
-          setPhase('ready')
-          setSetupStatus(`Ready — ${count} outputs available`)
+          setSetupStatus(`Confirmed: ${status} — ${count} outputs available`)
           es.close(); sseRef.current = null
-          addLog({ type: 'success', msg: 'Setup complete — blast phase unlocked' })
+          addLog({ type: 'success', msg: `Setup confirmed: ${status}` })
         }
       } catch {}
     })
 
     es.addEventListener('error', () => {
-      setSetupStatus('SSE dropped — tx submitted. Enable blast manually if confirmed.')
-      setPhase('ready')
+      setSetupStatus('SSE dropped — status updates stopped.')
       es.close(); sseRef.current = null
     })
 
     setTimeout(() => {
       if (sseRef.current === es) {
-        setPhase('ready')
-        setSetupStatus('SSE timeout — enabling blast (tx may still propagate)')
+        setSetupStatus('SSE timeout — status updates stopped.')
         es.close(); sseRef.current = null
       }
     }, 60_000)
