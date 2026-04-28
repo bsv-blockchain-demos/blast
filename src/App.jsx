@@ -1,9 +1,11 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
-import { PrivateKey, P2PKH, ARC } from '@bsv/sdk'
+import { useState, useRef, useEffect, useMemo } from 'react'
+import { PrivateKey, P2PKH, ARC, WalletClient } from '@bsv/sdk'
+import { QRCodeSVG } from 'qrcode.react'
 import { fetchUTXOs } from './woc.js'
 import { buildSetupTx } from './buildSetupTx.js'
 
 const PERSIST_KEY = 'blast_state'
+const WIF_KEY = 'blast_wif'
 
 function ts() {
   return new Date().toLocaleTimeString('en', { hour12: false })
@@ -22,14 +24,25 @@ function savePersist(obj) {
   try { localStorage.setItem(PERSIST_KEY, JSON.stringify(obj)) } catch {}
 }
 
+function loadWif() {
+  try { return localStorage.getItem(WIF_KEY) ?? '' } catch { return '' }
+}
+
+function saveWif(wif) {
+  try { localStorage.setItem(WIF_KEY, wif) } catch {}
+}
+
 export default function App() {
   const [hostUrl, setHostUrl] = useState(() => loadPersist().hostUrl ?? 'https://arcade-v2-us-1.bsvblockchain.tech')
-  const [wifKey, setWifKey] = useState('')
+  const [wifKey, setWifKey] = useState(() => loadWif())
   const [network, setNetwork] = useState(() => loadPersist().network ?? 'main')
   const [outputCount, setOutputCount] = useState(100)
   const [satoshisPerOutput, setSatoshisPerOutput] = useState(() => loadPersist().satoshisPerOutput ?? 1000)
+  const [fundAmount, setFundAmount] = useState(10000)
+  const [fundStatus, setFundStatus] = useState('')
+  const [fundError, setFundError] = useState('')
 
-  const [phase, setPhase] = useState('idle') // idle | setup | ready | blasting
+  const [phase, setPhase] = useState('idle')
   const [setupStatus, setSetupStatus] = useState('')
   const [setupError, setSetupError] = useState('')
 
@@ -48,10 +61,29 @@ export default function App() {
   const workerRef = useRef(null)
   const sseRef = useRef(null)
   const tpsCounterRef = useRef({ count: 0, lastTime: Date.now() })
-  const statsRef = useRef(stats)
-  statsRef.current = stats
 
-  const hasResume = Boolean(loadPersist().setupTxid) && loadPersist().setupTxid !== ''
+  // Derive address from WIF + network
+  const { address, keyError } = useMemo(() => {
+    if (!wifKey.trim()) return { address: null, keyError: null }
+    try {
+      const key = PrivateKey.fromWif(wifKey.trim())
+      return { address: key.toAddress(network === 'main' ? [0x00] : [0x6f]), keyError: null }
+    } catch (e) {
+      return { address: null, keyError: e.message }
+    }
+  }, [wifKey, network])
+
+  // Persist WIF to localStorage whenever it changes (valid or not — user may be mid-paste)
+  useEffect(() => {
+    if (wifKey) saveWif(wifKey)
+  }, [wifKey])
+
+  function generateRandomKey() {
+    const key = PrivateKey.fromRandom()
+    const wif = key.toWif(network === 'main' ? [0x80] : [0xef])
+    setWifKey(wif)
+    saveWif(wif)
+  }
 
   function addLog(entry) {
     setLog(prev => [{ id: Date.now() + Math.random(), time: ts(), ...entry }, ...prev].slice(0, 500))
@@ -70,21 +102,40 @@ export default function App() {
     setUtxos(null)
   }
 
+  async function handleFundViaWallet() {
+    if (!address) return
+    setFundError('')
+    setFundStatus('Opening wallet…')
+    try {
+      const wallet = new WalletClient()
+      const lockingScript = new P2PKH().lock(address).toHex()
+      const result = await wallet.createAction({
+        description: 'Fund blast tester address',
+        outputs: [{
+          lockingScript,
+          satoshis: parseInt(fundAmount),
+          outputDescription: `blast address ${address.slice(0, 8)}…`
+        }]
+      })
+      setFundStatus(`Sent — txid: ${shortTxid(result.txid ?? '')}`)
+      addLog({ type: 'info', msg: `Funded ${parseInt(fundAmount).toLocaleString()} sats via wallet · txid ${shortTxid(result.txid ?? '')}` })
+    } catch (err) {
+      setFundError(err.message)
+      setFundStatus('')
+    }
+  }
+
   async function handleFetchUTXOs() {
     setSetupError('')
+    if (!address) { setSetupError('Invalid WIF key'); return }
     try {
-      let key
-      try { key = PrivateKey.fromWif(wifKey.trim()) } catch {
-        throw new Error('Invalid WIF private key')
-      }
-      const addr = key.toAddress(network === 'main' ? [0x00] : [0x6f])
-      setSetupStatus(`Fetching UTXOs for ${addr}…`)
-      const data = await fetchUTXOs(addr, network)
+      setSetupStatus(`Fetching UTXOs for ${address}…`)
+      const data = await fetchUTXOs(address, network)
       if (data.length === 0) throw new Error('No UTXOs found for this address')
       setUtxos(data)
       const total = data.reduce((s, u) => s + u.value, 0)
       setSetupStatus(`${data.length} UTXOs · ${total.toLocaleString()} sats`)
-      addLog({ type: 'info', msg: `Fetched ${data.length} UTXOs (${total.toLocaleString()} sats) for ${addr}` })
+      addLog({ type: 'info', msg: `Fetched ${data.length} UTXOs (${total.toLocaleString()} sats) for ${address}` })
     } catch (err) {
       setSetupError(err.message)
       setSetupStatus('')
@@ -93,13 +144,9 @@ export default function App() {
 
   async function handleBroadcastSetup() {
     setSetupError('')
+    if (!address) { setSetupError('Invalid WIF key'); return }
     try {
-      let privateKey
-      try { privateKey = PrivateKey.fromWif(wifKey.trim()) } catch {
-        throw new Error('Invalid WIF private key')
-      }
-      const address = privateKey.toAddress(network === 'main' ? [0x00] : [0x6f])
-
+      const privateKey = PrivateKey.fromWif(wifKey.trim())
       setPhase('setup')
       setSetupStatus('Building setup transaction…')
 
@@ -134,9 +181,9 @@ export default function App() {
       savePersist({ hostUrl, network, setupTxid: txid, setupOutputCount: count, satoshisPerOutput: satsEach, nextVout: 0 })
 
       addLog({ type: 'setup', txid, status: result.data ?? 'BROADCAST', msg: `Setup tx · ${count} outputs` })
-      setSetupStatus(`Broadcast OK — waiting for SEEN_ON_NETWORK…`)
+      setSetupStatus('Broadcast OK — waiting for SEEN_ON_NETWORK…')
 
-      openSSE(arcUrl, callbackToken, txid)
+      openSSE(arcUrl, callbackToken, txid, count)
     } catch (err) {
       setSetupError(err.message)
       setPhase('idle')
@@ -144,19 +191,14 @@ export default function App() {
     }
   }
 
-  function openSSE(arcUrl, callbackToken, expectedTxid) {
-    if (sseRef.current) {
-      sseRef.current.close()
-      sseRef.current = null
-    }
+  function openSSE(arcUrl, callbackToken, expectedTxid, count) {
+    if (sseRef.current) { sseRef.current.close(); sseRef.current = null }
 
-    const url = `${arcUrl}/events?callbackToken=${encodeURIComponent(callbackToken)}`
     let es
-
     try {
-      es = new EventSource(url)
+      es = new EventSource(`${arcUrl}/events?callbackToken=${encodeURIComponent(callbackToken)}`)
     } catch {
-      setSetupStatus('SSE not supported — tx submitted. Check manually, then enable blast.')
+      setSetupStatus('SSE unavailable — tx submitted. Enable blast manually if confirmed.')
       setPhase('ready')
       return
     }
@@ -169,46 +211,34 @@ export default function App() {
         const status = data.txStatus ?? data.status ?? 'UPDATE'
         addLog({ type: 'setup', txid: data.txid ?? expectedTxid, status })
         setSetupStatus(`Status: ${status}`)
-
         if (status === 'SEEN_ON_NETWORK' || status === 'MINED') {
           setPhase('ready')
-          setSetupStatus(`Ready — ${setupOutputCount || parseInt(outputCount)} outputs available`)
-          es.close()
-          sseRef.current = null
-          addLog({ type: 'success', msg: `Setup complete — blast phase unlocked` })
+          setSetupStatus(`Ready — ${count} outputs available`)
+          es.close(); sseRef.current = null
+          addLog({ type: 'success', msg: 'Setup complete — blast phase unlocked' })
         }
       } catch {}
     })
 
     es.addEventListener('error', () => {
-      setSetupStatus('SSE connection dropped — tx submitted. Enable blast manually if confirmed.')
+      setSetupStatus('SSE dropped — tx submitted. Enable blast manually if confirmed.')
       setPhase('ready')
-      es.close()
-      sseRef.current = null
+      es.close(); sseRef.current = null
     })
 
     setTimeout(() => {
       if (sseRef.current === es) {
         setPhase('ready')
         setSetupStatus('SSE timeout — enabling blast (tx may still propagate)')
-        es.close()
-        sseRef.current = null
+        es.close(); sseRef.current = null
       }
     }, 60_000)
   }
 
-  function handleEnableBlastManually() {
-    setPhase('ready')
-    setSetupStatus('Manually enabled')
-  }
-
   function handleStartBlast() {
     if (!setupTxid || phase === 'blasting') return
-
-    const currentNextVout = nextVout
-    const currentCount = setupOutputCount
-    if (currentNextVout >= currentCount) {
-      addLog({ type: 'info', msg: 'All outputs already spent. Reset setup to start again.' })
+    if (nextVout >= setupOutputCount) {
+      addLog({ type: 'info', msg: 'All outputs spent — reset setup to start again' })
       return
     }
 
@@ -218,7 +248,7 @@ export default function App() {
 
     setPhase('blasting')
     tpsCounterRef.current = { count: 0, lastTime: Date.now() }
-    addLog({ type: 'info', msg: `Blast start — ${rate} TPS · batch ${batch} · interval ${intervalMs}ms · from vout ${currentNextVout}` })
+    addLog({ type: 'info', msg: `Blast start — ${rate} TPS · batch ${batch} · interval ${intervalMs}ms · from vout ${nextVout}` })
 
     const BlastWorker = new Worker(new URL('./blastWorker.js', import.meta.url), { type: 'module' })
     workerRef.current = BlastWorker
@@ -249,7 +279,7 @@ export default function App() {
             msg: `batch ${txCount} txs (vout ${data.batchStartVout}–${nv - 1})`
           })
         } else {
-          addLog({ type: 'blast', msg: `batch ${txCount} txs (vout ${data.batchStartVout}–${nv - 1}) — no result data` })
+          addLog({ type: 'blast', msg: `batch ${txCount} txs (vout ${data.batchStartVout}–${nv - 1})` })
         }
       }
 
@@ -263,7 +293,7 @@ export default function App() {
 
       if (data.type === 'done') {
         setPhase('ready')
-        addLog({ type: 'info', msg: `Blast done — reason: ${data.reason}` })
+        addLog({ type: 'info', msg: `Blast done — ${data.reason}` })
         BlastWorker.terminate()
         workerRef.current = null
       }
@@ -278,8 +308,8 @@ export default function App() {
       type: 'start',
       hostUrl: hostUrl.replace(/\/$/, ''),
       setupTxid,
-      setupOutputCount: currentCount,
-      startVout: currentNextVout,
+      setupOutputCount,
+      startVout: nextVout,
       batchSize: batch,
       intervalMs
     })
@@ -289,10 +319,7 @@ export default function App() {
     if (workerRef.current) {
       workerRef.current.postMessage({ type: 'stop' })
       setTimeout(() => {
-        if (workerRef.current) {
-          workerRef.current.terminate()
-          workerRef.current = null
-        }
+        if (workerRef.current) { workerRef.current.terminate(); workerRef.current = null }
         setPhase('ready')
         addLog({ type: 'info', msg: 'Blast aborted' })
       }, 500)
@@ -311,7 +338,6 @@ export default function App() {
     addLog({ type: 'info', msg: `Resumed: txid ${shortTxid(saved.setupTxid)}, next vout ${saved.nextVout ?? 0}` })
   }
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (workerRef.current) workerRef.current.terminate()
@@ -319,9 +345,11 @@ export default function App() {
     }
   }, [])
 
-  const canFetchUtxos = Boolean(wifKey.trim()) && Boolean(hostUrl.trim())
+  const saved = loadPersist()
+  const hasResume = Boolean(saved.setupTxid)
+  const canFetchUtxos = Boolean(address) && Boolean(hostUrl.trim()) && phase === 'idle'
   const canBroadcastSetup = utxos !== null && utxos.length > 0 && phase === 'idle'
-  const canStartBlast = (phase === 'ready') && Boolean(setupTxid) && nextVout < setupOutputCount
+  const canStartBlast = phase === 'ready' && Boolean(setupTxid) && nextVout < setupOutputCount
   const remaining = setupOutputCount - nextVout
 
   return (
@@ -338,17 +366,75 @@ export default function App() {
       <div className="main">
         <div className="sidebar">
 
+          {/* Key & Address */}
+          <div className="section">
+            <div className="section-title">Key</div>
+            <div className="section-body">
+              <div className="field">
+                <label>WIF Private Key</label>
+                <input
+                  type="password"
+                  value={wifKey}
+                  onChange={e => setWifKey(e.target.value)}
+                  placeholder="5J… or L… or K… (saved locally)"
+                  disabled={phase === 'blasting'}
+                />
+              </div>
+              {keyError && <div className="status-text err">{keyError}</div>}
+              <button
+                className="btn btn-secondary"
+                onClick={generateRandomKey}
+                disabled={phase === 'blasting'}
+              >
+                Generate Random Key
+              </button>
+
+              {address && (
+                <div className="address-panel">
+                  <div className="qr-wrap" onClick={!keyError ? handleFundViaWallet : undefined} title="Click to fund via connected wallet">
+                    <QRCodeSVG
+                      value={address}
+                      size={180}
+                      bgColor="transparent"
+                      fgColor="#00d4aa"
+                      level="M"
+                    />
+                    <div className="qr-overlay">Fund via Wallet</div>
+                  </div>
+                  <div className="address-string" onClick={() => navigator.clipboard?.writeText(address)} title="Click to copy">
+                    {address}
+                  </div>
+                  <div className="field" style={{ marginTop: 4 }}>
+                    <label>Fund Amount (sats)</label>
+                    <input
+                      type="number"
+                      value={fundAmount}
+                      onChange={e => setFundAmount(e.target.value)}
+                      min={1000}
+                    />
+                  </div>
+                  <button className="btn btn-primary" onClick={handleFundViaWallet}>
+                    Fund via Wallet
+                  </button>
+                  {fundStatus && <div className="status-text ok">{fundStatus}</div>}
+                  {fundError && <div className="status-text err">{fundError}</div>}
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* Config */}
           <div className="section">
             <div className="section-title">Config</div>
             <div className="section-body">
               <div className="field">
                 <label>Host URL</label>
-                <input value={hostUrl} onChange={e => setHostUrl(e.target.value)} placeholder="http://arcade.example.com" disabled={phase === 'blasting'} />
-              </div>
-              <div className="field">
-                <label>WIF Private Key</label>
-                <input type="password" value={wifKey} onChange={e => setWifKey(e.target.value)} placeholder="5J… or L… or K…" disabled={phase === 'blasting'} />
+                <input
+                  value={hostUrl}
+                  onChange={e => setHostUrl(e.target.value)}
+                  placeholder="http://arcade.example.com"
+                  disabled={phase === 'blasting'}
+                />
               </div>
               <div className="field">
                 <label>Network</label>
@@ -364,8 +450,8 @@ export default function App() {
           {hasResume && phase === 'idle' && (
             <div className="resume-banner">
               <strong>Saved session found</strong>
-              txid: {shortTxid(loadPersist().setupTxid)}<br />
-              next vout: {loadPersist().nextVout ?? 0} / {loadPersist().setupOutputCount ?? '?'}
+              txid: {shortTxid(saved.setupTxid)}<br />
+              next vout: {saved.nextVout ?? 0} / {saved.setupOutputCount ?? '?'}
               <button className="btn btn-warn" style={{ marginTop: 8 }} onClick={handleResumeFromSaved}>
                 Resume
               </button>
@@ -392,13 +478,13 @@ export default function App() {
               )}
 
               {setupStatus && (
-                <div className={`status-text ${setupError ? 'err' : phase === 'ready' ? 'ok' : 'warn'}`}>
+                <div className={`status-text ${phase === 'ready' ? 'ok' : 'warn'}`}>
                   {setupStatus}
                 </div>
               )}
               {setupError && <div className="status-text err">{setupError}</div>}
 
-              <button className="btn btn-secondary" onClick={handleFetchUTXOs} disabled={!canFetchUtxos || phase !== 'idle'}>
+              <button className="btn btn-secondary" onClick={handleFetchUTXOs} disabled={!canFetchUtxos}>
                 Fetch UTXOs
               </button>
               <button className="btn btn-primary" onClick={handleBroadcastSetup} disabled={!canBroadcastSetup}>
@@ -406,19 +492,15 @@ export default function App() {
               </button>
 
               {phase === 'setup' && (
-                <button className="btn btn-secondary" onClick={handleEnableBlastManually}>
+                <button className="btn btn-secondary" onClick={() => { setPhase('ready'); setSetupStatus('Manually enabled') }}>
                   Enable Blast Manually
                 </button>
               )}
 
               {(phase === 'ready' || phase === 'blasting') && setupTxid && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <div className="status-text ok">
-                    Setup txid: {shortTxid(setupTxid)}
-                  </div>
-                  <div className="status-text ok">
-                    {remaining.toLocaleString()} / {setupOutputCount.toLocaleString()} outputs remaining
-                  </div>
+                  <div className="status-text ok">Setup: {shortTxid(setupTxid)}</div>
+                  <div className="status-text ok">{remaining.toLocaleString()} / {setupOutputCount.toLocaleString()} remaining</div>
                   <button className="btn btn-secondary" style={{ marginTop: 4 }} onClick={resetSetup} disabled={phase === 'blasting'}>
                     Reset Setup
                   </button>
@@ -436,12 +518,14 @@ export default function App() {
                 <input type="number" value={blastRate} onChange={e => setBlastRate(e.target.value)} min={0.1} step={1} disabled={phase === 'blasting'} />
               </div>
               <div className="field">
-                <label>Batch Size (txs per call)</label>
+                <label>Batch Size (txs per /v1/txs call)</label>
                 <input type="number" value={batchSize} onChange={e => setBatchSize(e.target.value)} min={1} max={1000} disabled={phase === 'blasting'} />
               </div>
 
               {phase === 'blasting' && (
-                <div className="tps-display">{stats.tps} <span style={{ fontSize: 12, color: 'var(--muted)' }}>TPS</span></div>
+                <div className="tps-display">
+                  {stats.tps} <span style={{ fontSize: 12, color: 'var(--muted)' }}>TPS</span>
+                </div>
               )}
 
               <div className="stats-grid">
@@ -491,12 +575,8 @@ export default function App() {
                 <span className="log-time">{entry.time}</span>
                 <span className={`log-type log-type-${entry.type}`}>{entry.type}</span>
                 <span className="log-content">
-                  {entry.txid && (
-                    <span className="log-txid">{shortTxid(entry.txid)} </span>
-                  )}
-                  {entry.status && (
-                    <span className={`log-status log-status-${entry.status}`}>{entry.status} </span>
-                  )}
+                  {entry.txid && <span className="log-txid">{shortTxid(entry.txid)} </span>}
+                  {entry.status && <span className={`log-status log-status-${entry.status}`}>{entry.status} </span>}
                   {entry.msg && <span className="log-msg">{entry.msg}</span>}
                 </span>
               </div>
