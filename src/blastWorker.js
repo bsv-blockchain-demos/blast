@@ -24,7 +24,7 @@ function buildBlastTx(setupTxid, vout) {
 
 async function broadcastBatch(hostUrl, txs) {
   const rawTxs = txs.map(tx => ({ rawTx: tx.toHex() }))
-  const res = await fetch(`${hostUrl}/v1/txs`, {
+  const res = await fetch(`${hostUrl}/txs`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(rawTxs),

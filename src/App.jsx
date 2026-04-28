@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
-import { PrivateKey, P2PKH, ARC, WalletClient } from '@bsv/sdk'
+import { PrivateKey, P2PKH, WalletClient } from '@bsv/sdk'
 import { QRCodeSVG } from 'qrcode.react'
 import { fetchUTXOs } from './woc.js'
 import { buildSetupTx } from './buildSetupTx.js'
@@ -163,11 +163,18 @@ export default function App() {
 
       setSetupStatus('Broadcasting…')
 
-      const arc = new ARC(arcUrl, { callbackToken })
-      const result = await arc.broadcast(tx)
-
-      if (result.status === 'error') {
-        throw new Error(result.description ?? 'Broadcast failed')
+      const broadcastRes = await fetch(`${arcUrl}/tx`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CallbackToken': callbackToken
+        },
+        body: JSON.stringify({ rawTx: tx.toHex() }),
+        signal: AbortSignal.timeout(30_000)
+      })
+      const result = await broadcastRes.json()
+      if (!broadcastRes.ok) {
+        throw new Error(result?.detail ?? result?.message ?? `HTTP ${broadcastRes.status}`)
       }
 
       const txid = result.txid
@@ -180,7 +187,7 @@ export default function App() {
       setNextVout(0)
       savePersist({ hostUrl, network, setupTxid: txid, setupOutputCount: count, satoshisPerOutput: satsEach, nextVout: 0 })
 
-      addLog({ type: 'setup', txid, status: result.data ?? 'BROADCAST', msg: `Setup tx · ${count} outputs` })
+      addLog({ type: 'setup', txid, status: result.txStatus ?? 'BROADCAST', msg: `Setup tx · ${count} outputs` })
       setSetupStatus('Broadcast OK — waiting for SEEN_ON_NETWORK…')
 
       openSSE(arcUrl, callbackToken, txid, count)
@@ -518,7 +525,7 @@ export default function App() {
                 <input type="number" value={blastRate} onChange={e => setBlastRate(e.target.value)} min={0.1} step={1} disabled={phase === 'blasting'} />
               </div>
               <div className="field">
-                <label>Batch Size (txs per /v1/txs call)</label>
+                <label>Batch Size (txs per /txs call)</label>
                 <input type="number" value={batchSize} onChange={e => setBatchSize(e.target.value)} min={1} max={1000} disabled={phase === 'blasting'} />
               </div>
 
