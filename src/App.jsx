@@ -371,11 +371,11 @@ export default function App() {
         </span>
       </div>
 
-      <div className="main">
-        <div className="sidebar">
+      <div className="body">
+        <div className="panels">
 
           {/* Key & Address */}
-          <div className="section">
+          <div className="section section-key">
             <div className="section-title">Key</div>
             <div className="section-body">
               <div className="field">
@@ -564,7 +564,7 @@ export default function App() {
             </div>
           </div>
 
-        </div>
+        </div>{/* /panels */}
 
         {/* Log pane */}
         <div className="log-pane">
@@ -591,7 +591,7 @@ export default function App() {
             ))}
           </div>
         </div>
-      </div>
+      </div>{/* /body */}
     </div>
   )
 }

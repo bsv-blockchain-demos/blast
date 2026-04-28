@@ -48,25 +48,35 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
 
-.main { display: flex; flex: 1; overflow: hidden; }
-
-.sidebar {
-  width: 320px;
-  flex-shrink: 0;
-  border-right: 1px solid var(--border);
-  overflow-y: auto;
-  padding: 16px;
+.body {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  background: var(--panel);
+  flex: 1;
+  overflow: hidden;
+}
+
+.panels {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px;
+  overflow-y: auto;
+  flex: 1;
+  align-content: flex-start;
+  background: var(--bg);
 }
 
 .section {
+  flex: 1 1 240px;
+  max-width: 360px;
   border: 1px solid var(--border);
   border-radius: 4px;
   overflow: hidden;
+  align-self: flex-start;
 }
+
+.section-key { flex: 1 1 240px; max-width: 280px; }
 
 .section-title {
   padding: 6px 12px;
@@ -151,10 +161,12 @@ input:disabled { opacity: 0.4; cursor: not-allowed; }
 .stat-label { font-size: 10px; color: var(--muted); margin-top: 2px; letter-spacing: 1px; text-transform: uppercase; }
 
 .log-pane {
-  flex: 1;
+  flex: 0 0 35%;
+  min-height: 180px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  border-top: 1px solid var(--border);
 }
 
 .log-header {
@@ -303,10 +315,13 @@ input:disabled { opacity: 0.4; cursor: not-allowed; }
 }
 
 .resume-banner {
+  flex: 1 1 240px;
+  max-width: 360px;
+  align-self: flex-start;
   background: #1a1a00;
   border: 1px solid var(--warn);
-  border-radius: 3px;
-  padding: 10px;
+  border-radius: 4px;
+  padding: 10px 12px;
   font-size: 11px;
   color: var(--warn);
 }
