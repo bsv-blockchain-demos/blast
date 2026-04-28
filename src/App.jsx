@@ -37,7 +37,7 @@ export default function App() {
   const [wifKey, setWifKey] = useState(() => loadWif())
   const [network, setNetwork] = useState(() => loadPersist().network ?? 'main')
   const [outputCount, setOutputCount] = useState(100)
-  const [satoshisPerOutput, setSatoshisPerOutput] = useState(() => loadPersist().satoshisPerOutput ?? 1000)
+  const [satoshisPerOutput, setSatoshisPerOutput] = useState(() => loadPersist().satoshisPerOutput ?? 20)
   const [fundAmount, setFundAmount] = useState(10000)
   const [fundStatus, setFundStatus] = useState('')
   const [fundError, setFundError] = useState('')
@@ -49,7 +49,7 @@ export default function App() {
   const [utxos, setUtxos] = useState(null)
   const [setupTxid, setSetupTxid] = useState(() => loadPersist().setupTxid ?? '')
   const [setupOutputCount, setSetupOutputCount] = useState(() => loadPersist().setupOutputCount ?? 0)
-  const [setupSatoshisPerOutput, setSetupSatoshisPerOutput] = useState(() => loadPersist().satoshisPerOutput ?? 1000)
+  const [setupSatoshisPerOutput, setSetupSatoshisPerOutput] = useState(() => loadPersist().satoshisPerOutput ?? 20)
   const [nextVout, setNextVout] = useState(() => loadPersist().nextVout ?? 0)
 
   const [blastRate, setBlastRate] = useState(10)
@@ -339,7 +339,7 @@ export default function App() {
     if (!saved.setupTxid) return
     setSetupTxid(saved.setupTxid)
     setSetupOutputCount(saved.setupOutputCount ?? 0)
-    setSetupSatoshisPerOutput(saved.satoshisPerOutput ?? 1000)
+    setSetupSatoshisPerOutput(saved.satoshisPerOutput ?? 20)
     setNextVout(saved.nextVout ?? 0)
     if (saved.hostUrl) setHostUrl(saved.hostUrl)
     setPhase('ready')
@@ -476,7 +476,7 @@ export default function App() {
               </div>
               <div className="field">
                 <label>Sats Per Output</label>
-                <input type="number" value={satoshisPerOutput} onChange={e => setSatoshisPerOutput(e.target.value)} min={100} disabled={phase !== 'idle'} />
+                <input type="number" value={satoshisPerOutput} onChange={e => setSatoshisPerOutput(e.target.value)} min={1} disabled={phase !== 'idle'} />
               </div>
 
               {utxos && (
