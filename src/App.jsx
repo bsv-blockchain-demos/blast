@@ -381,7 +381,7 @@ export default function App() {
               <div className="field">
                 <label>WIF Private Key</label>
                 <input
-                  type="password"
+                  type="text"
                   value={wifKey}
                   onChange={e => setWifKey(e.target.value)}
                   placeholder="5J… or L… or K… (saved locally)"
