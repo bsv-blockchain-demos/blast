@@ -1,16 +1,15 @@
-import { Transaction, Script, P2PKH } from '@bsv/sdk'
+import { Transaction, P2PKH } from '@bsv/sdk'
 
 const FEE_RATE_SAT_PER_KB = 100
 
 const P2PKH_INPUT_SIZE = 148  // 32 + 4 + 1 + 107 + 4
-const NOP_OUTPUT_SIZE = 10    // 8 + 1 + 1
 const P2PKH_OUTPUT_SIZE = 34  // 8 + 1 + 25
 const TX_OVERHEAD = 10        // 4 + 1 + 1 + 4
 
 function estimateFee(inputCount, outputCount, hasChange) {
   const size = TX_OVERHEAD
     + inputCount * P2PKH_INPUT_SIZE
-    + outputCount * NOP_OUTPUT_SIZE
+    + outputCount * P2PKH_OUTPUT_SIZE
     + (hasChange ? P2PKH_OUTPUT_SIZE : 0)
   return Math.ceil(size * FEE_RATE_SAT_PER_KB / 1000) + 10
 }
@@ -27,7 +26,6 @@ function txidToHashBytes(txidHex) {
 export async function buildSetupTx({ utxos, privateKey, address, outputCount, satoshisPerOutput }) {
   const p2pkh = new P2PKH()
   const addressLock = p2pkh.lock(address)
-  const setupLock = Script.fromHex('61') // OP_NOP
 
   const totalIn = utxos.reduce((s, u) => s + u.value, 0)
   const totalSetupOut = outputCount * satoshisPerOutput
@@ -64,7 +62,7 @@ export async function buildSetupTx({ utxos, privateKey, address, outputCount, sa
   }
 
   for (let i = 0; i < outputCount; i++) {
-    tx.addOutput({ lockingScript: setupLock, satoshis: satoshisPerOutput })
+    tx.addOutput({ lockingScript: addressLock, satoshis: satoshisPerOutput })
   }
 
   if (change > 546) {
