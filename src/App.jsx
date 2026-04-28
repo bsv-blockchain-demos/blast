@@ -166,18 +166,18 @@ export default function App() {
       const broadcastRes = await fetch(`${arcUrl}/tx`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': 'application/octet-stream',
           'X-CallbackToken': callbackToken
         },
-        body: JSON.stringify({ rawTx: tx.toHexEF() }),
-        signal: AbortSignal.timeout(30_000)
+        body: new Uint8Array(tx.toEF()),
+        signal: AbortSignal.timeout(3_000)
       })
       const result = await broadcastRes.json()
       if (!broadcastRes.ok) {
         throw new Error(result?.detail ?? result?.message ?? `HTTP ${broadcastRes.status}`)
       }
 
-      const txid = result.txid
+      const txid = tx.id('hex')
       const count = parseInt(outputCount)
       const satsEach = parseInt(satoshisPerOutput)
 
@@ -240,7 +240,9 @@ export default function App() {
   }
 
   function handleStartBlast() {
-    if (!setupTxid || phase === 'blasting') return
+    if (!setupTxid || phase === 'blasting') {
+      addLog({ type: 'info', msg: 'setupTxid: ' + setupTxid + ' phase: ' + phase })
+    }
     if (nextVout >= setupOutputCount) {
       addLog({ type: 'info', msg: 'All outputs spent — reset setup to start again' })
       return

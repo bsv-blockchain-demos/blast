@@ -41,12 +41,12 @@ async function buildBlastTx(setupTxid, vout, satoshisPerOutput) {
 }
 
 async function broadcastBatch(hostUrl, txs) {
-  const rawTxs = txs.map(tx => ({ rawTx: tx.toHexEF() }))
+  const rawTxs = txs.map(tx => tx.toEF())
   const res = await fetch(`${hostUrl}/txs`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(rawTxs),
-    signal: AbortSignal.timeout(30_000)
+    headers: { 'Content-Type': 'application/octet-stream' },
+    body: new Uint8Array(rawTxs.flat()),
+    signal: AbortSignal.timeout(3_000)
   })
 
   if (!res.ok) {
