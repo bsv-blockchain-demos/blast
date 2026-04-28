@@ -169,7 +169,7 @@ export default function App() {
           'Content-Type': 'application/json',
           'X-CallbackToken': callbackToken
         },
-        body: JSON.stringify({ rawTx: tx.toHex() }),
+        body: JSON.stringify({ rawTx: tx.toHexEF() }),
         signal: AbortSignal.timeout(30_000)
       })
       const result = await broadcastRes.json()
@@ -316,6 +316,7 @@ export default function App() {
       hostUrl: hostUrl.replace(/\/$/, ''),
       setupTxid,
       setupOutputCount,
+      satoshisPerOutput: setupSatoshisPerOutput,
       startVout: nextVout,
       batchSize: batch,
       intervalMs

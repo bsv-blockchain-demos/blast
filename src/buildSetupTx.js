@@ -2,22 +2,26 @@ import { Transaction, Script, P2PKH } from '@bsv/sdk'
 
 const FEE_RATE_SAT_PER_KB = 100
 
-// P2PKH input unlock size: 1 (script len varint) + 107 (P2PKH script) = 108
-// Full input: 32 (txid) + 4 (vout) + 108 + 4 (seq) = 148 bytes
-const P2PKH_INPUT_SIZE = 148
-// OP_NOP output (1 byte script): 8 (value) + 1 (script len) + 1 (script) = 10 bytes
-const NOP_OUTPUT_SIZE = 10
-// P2PKH output: 8 + 1 + 25 = 34 bytes
-const P2PKH_OUTPUT_SIZE = 34
-// Tx overhead: 4 (ver) + 1 (in count) + 1 (out count) + 4 (locktime) = 10 bytes
-const TX_OVERHEAD = 10
+const P2PKH_INPUT_SIZE = 148  // 32 + 4 + 1 + 107 + 4
+const NOP_OUTPUT_SIZE = 10    // 8 + 1 + 1
+const P2PKH_OUTPUT_SIZE = 34  // 8 + 1 + 25
+const TX_OVERHEAD = 10        // 4 + 1 + 1 + 4
 
 function estimateFee(inputCount, outputCount, hasChange) {
   const size = TX_OVERHEAD
     + inputCount * P2PKH_INPUT_SIZE
     + outputCount * NOP_OUTPUT_SIZE
     + (hasChange ? P2PKH_OUTPUT_SIZE : 0)
-  return Math.ceil(size * FEE_RATE_SAT_PER_KB / 1000) + 10 // +10 buffer
+  return Math.ceil(size * FEE_RATE_SAT_PER_KB / 1000) + 10
+}
+
+// Transaction.hash() returns little-endian bytes; txid hex is big-endian
+function txidToHashBytes(txidHex) {
+  const bytes = []
+  for (let i = 0; i < txidHex.length; i += 2) {
+    bytes.push(parseInt(txidHex.slice(i, i + 2), 16))
+  }
+  return bytes.reverse()
 }
 
 export async function buildSetupTx({ utxos, privateKey, address, outputCount, satoshisPerOutput }) {
@@ -40,9 +44,15 @@ export async function buildSetupTx({ utxos, privateKey, address, outputCount, sa
   const tx = new Transaction()
 
   for (const utxo of utxos) {
+    // Stub source tx so toHexEF() can embed source output data
+    const hashBytes = txidToHashBytes(utxo.tx_hash)
+    const stubOutputs = new Array(utxo.tx_pos + 1)
+    stubOutputs[utxo.tx_pos] = { lockingScript: addressLock, satoshis: utxo.value }
+
     tx.addInput({
       sourceTXID: utxo.tx_hash,
       sourceOutputIndex: utxo.tx_pos,
+      sourceTransaction: { outputs: stubOutputs, hash: () => hashBytes },
       unlockingScriptTemplate: p2pkh.unlock(
         privateKey,
         'all',
