@@ -549,10 +549,10 @@ export default function App() {
               </div>
 
               <div className="btn-row">
-                <button className="btn btn-primary" onClick={handleStartBlast} disabled={!canStartBlast}>
+                <button className="btn btn-primary" onClick={handleStartBlast}>
                   Start Blast
                 </button>
-                <button className="btn btn-danger" onClick={handleAbort} disabled={phase !== 'blasting'}>
+                <button className="btn btn-danger" onClick={handleAbort}>
                   Abort
                 </button>
               </div>
