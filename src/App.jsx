@@ -4,6 +4,7 @@ import { QRCodeSVG } from 'qrcode.react'
 import { fetchUTXOs } from './woc.js'
 import { buildSetupTx } from './buildSetupTx.js'
 import SseStream from './SseStream.jsx'
+import { TxidCopy } from './Txid.jsx'
 
 const PERSIST_KEY = 'blast_state'
 const WIF_KEY = 'blast_wif'
@@ -502,7 +503,7 @@ export default function App() {
 
               {(phase === 'ready' || phase === 'blasting') && setupTxid && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <div className="status-text ok">Setup: {shortTxid(setupTxid)}</div>
+                  <div className="status-text ok">Setup: <TxidCopy txid={setupTxid} /></div>
                   <div className="status-text ok">{remaining.toLocaleString()} / {setupOutputCount.toLocaleString()} remaining</div>
                   <button className="btn btn-secondary" style={{ marginTop: 4 }} onClick={resetSetup} disabled={phase === 'blasting'}>
                     Reset Setup
@@ -581,7 +582,7 @@ export default function App() {
                 <span className="log-time">{entry.time}</span>
                 <span className={`log-type log-type-${entry.type}`}>{entry.type}</span>
                 <span className="log-content">
-                  {entry.txid && <span className="log-txid">{shortTxid(entry.txid)} </span>}
+                  {entry.txid && <TxidCopy txid={entry.txid} />}
                   {entry.status && <span className={`log-status log-status-${entry.status}`}>{entry.status} </span>}
                   {entry.msg && <span className="log-msg">{entry.msg}</span>}
                 </span>

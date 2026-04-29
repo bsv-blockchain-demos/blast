@@ -274,6 +274,22 @@ input:disabled { opacity: 0.4; cursor: not-allowed; }
 .log-type-success { color: var(--ok); }
 .log-content { flex: 1; overflow: hidden; }
 .log-txid { color: var(--muted); font-size: 10px; }
+
+.txid-copy { display: inline-flex; align-items: baseline; gap: 4px; margin-right: 6px; }
+.copy-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 9px;
+  padding: 0 4px;
+  border-radius: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  line-height: 1.4;
+}
+.copy-btn:hover { color: var(--accent); border-color: var(--accent); }
 .log-status { font-weight: 700; }
 .log-status-SEEN_ON_NETWORK { color: var(--ok); }
 .log-status-SEEN_IN_ORPHAN_MEMPOOL { color: var(--warn); }

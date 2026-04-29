@@ -1,14 +1,10 @@
 import { useEffect, useState, useRef } from 'react'
+import { TxidCopy } from './Txid.jsx'
 
 const MAX_ENTRIES = 5000
 
 function ts() {
   return new Date().toLocaleTimeString('en', { hour12: false })
-}
-
-function shortTxid(txid) {
-  if (!txid || txid.length < 16) return txid
-  return `${txid.slice(0, 8)}…${txid.slice(-8)}`
 }
 
 export default function SseStream({ arcUrl, callbackToken }) {
@@ -78,7 +74,7 @@ export default function SseStream({ arcUrl, callbackToken }) {
           <div key={entry.txid} className="log-entry">
             <span className="log-time">{entry.time}</span>
             <span className="log-content">
-              <span className="log-txid">{shortTxid(entry.txid)} </span>
+              <TxidCopy txid={entry.txid} />
               <span className={`log-status log-status-${entry.status}`}>{entry.status}</span>
             </span>
           </div>
