@@ -276,6 +276,14 @@ input:disabled { opacity: 0.4; cursor: not-allowed; }
 .log-status-ANNOUNCED_TO_NETWORK { color: var(--blue); }
 .log-status-REQUEST_SUBMITTED { color: var(--muted); }
 .log-status-SENT_TO_NETWORK { color: var(--accent-dim); }
+.log-status-SENT { color: var(--muted); }
+.log-status-RECEIVED { color: var(--muted); }
+.log-status-UNKNOWN { color: var(--muted); }
+.log-status-ACCEPTED_BY_NETWORK { color: var(--blue); }
+.log-status-SEEN_MULTIPLE_NODES { color: var(--ok); }
+.log-status-PENDING_RETRY { color: var(--warn); }
+.log-status-STUMP_PROCESSING { color: var(--blue); }
+.log-status-IMMUTABLE { color: #00ff88; }
 .log-msg { color: var(--text); }
 
 .mono { font-family: inherit; }

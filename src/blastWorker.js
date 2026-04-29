@@ -40,11 +40,13 @@ async function buildBlastTx(setupTxid, vout, satoshisPerOutput) {
   return tx
 }
 
-async function broadcastBatch(hostUrl, txs) {
+async function broadcastBatch(hostUrl, txs, callbackToken) {
   const rawTxs = txs.map(tx => tx.toEF())
+  const headers = { 'Content-Type': 'application/octet-stream' }
+  if (callbackToken) headers['X-CallbackToken'] = callbackToken
   const res = await fetch(`${hostUrl}/txs`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/octet-stream' },
+    headers,
     body: new Uint8Array(rawTxs.flat()),
     signal: AbortSignal.timeout(3_000)
   })
@@ -67,7 +69,7 @@ self.onmessage = async ({ data }) => {
 
   if (data.type !== 'start') return
 
-  const { hostUrl, setupTxid, setupOutputCount, satoshisPerOutput, startVout, batchSize, intervalMs, wif, address } = data
+  const { hostUrl, setupTxid, setupOutputCount, satoshisPerOutput, startVout, batchSize, intervalMs, wif, address, callbackToken } = data
   aborted = false
   setupHashBytes = null
   workerP2PKH = new P2PKH()
@@ -84,18 +86,22 @@ self.onmessage = async ({ data }) => {
 
     const batchEnd = Math.min(nextVout + batchSize, setupOutputCount)
     const txs = []
+    const txids = []
     for (let v = nextVout; v < batchEnd; v++) {
-      txs.push(await buildBlastTx(setupTxid, v, satoshisPerOutput))
+      const tx = await buildBlastTx(setupTxid, v, satoshisPerOutput)
+      txs.push(tx)
+      txids.push(tx.id('hex'))
     }
     const batchStartVout = nextVout
     nextVout = batchEnd
 
     try {
-      const results = await broadcastBatch(hostUrl, txs)
+      const results = await broadcastBatch(hostUrl, txs, callbackToken)
       if (!aborted) {
         self.postMessage({
           type: 'batch',
           results: Array.isArray(results) ? results : [],
+          txids,
           batchStartVout,
           nextVout,
           txCount: txs.length
@@ -106,6 +112,7 @@ self.onmessage = async ({ data }) => {
         self.postMessage({
           type: 'batch_error',
           error: err.message,
+          txids,
           batchStartVout,
           nextVout,
           txCount: txs.length

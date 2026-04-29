@@ -57,10 +57,18 @@ export default function App() {
 
   const [log, setLog] = useState([])
   const [stats, setStats] = useState({ sent: 0, errors: 0, batches: 0, tps: 0 })
+  const [txStatusMap, setTxStatusMap] = useState({})
 
   const workerRef = useRef(null)
   const sseRef = useRef(null)
+  const blastSseRef = useRef(null)
   const tpsCounterRef = useRef({ count: 0, lastTime: Date.now() })
+  const allTxidsRef = useRef([])
+
+  function applyStatus(txid, status) {
+    if (!txid || !status) return
+    setTxStatusMap(prev => prev[txid] === status ? prev : { ...prev, [txid]: status })
+  }
 
   // Derive address from WIF + network
   const { address, keyError } = useMemo(() => {
@@ -86,10 +94,28 @@ export default function App() {
   }
 
   function addLog(entry) {
-    setLog(prev => [{ id: Date.now() + Math.random(), time: ts(), ...entry }, ...prev].slice(0, 500))
+    setLog(prev => [{ id: Date.now() + Math.random(), time: ts(), ...entry }, ...prev].slice(0, 5000))
   }
 
-  function clearLog() { setLog([]) }
+  function clearLog() {
+    setLog([])
+    allTxidsRef.current = []
+    setTxStatusMap({})
+  }
+
+  function downloadTxids() {
+    const txids = allTxidsRef.current
+    if (txids.length === 0) return
+    const blob = new Blob([txids.join('\n') + '\n'], { type: 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `blast-txids-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
 
   function resetSetup() {
     savePersist({ hostUrl, network, satoshisPerOutput })
@@ -100,6 +126,8 @@ export default function App() {
     setSetupStatus('')
     setSetupError('')
     setUtxos(null)
+    if (sseRef.current) { sseRef.current.close(); sseRef.current = null }
+    if (blastSseRef.current) { blastSseRef.current.close(); blastSseRef.current = null }
   }
 
   async function handleFundViaWallet() {
@@ -187,6 +215,7 @@ export default function App() {
       setNextVout(0)
       savePersist({ hostUrl, network, setupTxid: txid, setupOutputCount: count, satoshisPerOutput: satsEach, nextVout: 0 })
 
+      allTxidsRef.current.push(txid)
       addLog({ type: 'setup', txid, status: result.txStatus ?? 'BROADCAST', msg: `Setup tx · ${count} outputs` })
       setSetupStatus(`Ready — ${count} outputs available`)
       setPhase('ready')
@@ -216,7 +245,8 @@ export default function App() {
       try {
         const data = JSON.parse(e.data)
         const status = data.txStatus ?? data.status ?? 'UPDATE'
-        addLog({ type: 'setup', txid: data.txid ?? expectedTxid, status })
+        const txid = data.txid ?? expectedTxid
+        applyStatus(txid, status)
         setSetupStatus(`Status: ${status}`)
         if (status === 'SEEN_ON_NETWORK' || status === 'MINED') {
           setSetupStatus(`Confirmed: ${status} — ${count} outputs available`)
@@ -239,6 +269,45 @@ export default function App() {
     }, 60_000)
   }
 
+  function openBlastSSE(arcUrl, callbackToken) {
+    if (blastSseRef.current) { blastSseRef.current.close(); blastSseRef.current = null }
+    let es
+    try {
+      es = new EventSource(`${arcUrl}/events?callbackToken=${encodeURIComponent(callbackToken)}`)
+    } catch {
+      addLog({ type: 'error', msg: 'Blast SSE unavailable — live status disabled' })
+      return
+    }
+    blastSseRef.current = es
+    let eventCount = 0
+    es.onopen = () => {
+      console.log('[blast-sse] open', { url: `${arcUrl}/events`, token: callbackToken })
+      addLog({ type: 'info', msg: `Blast SSE open · token ${callbackToken.slice(0, 8)}…` })
+    }
+    es.addEventListener('status', (e) => {
+      eventCount++
+      try {
+        const data = JSON.parse(e.data)
+        console.log('[blast-sse] status', data)
+        const status = data.txStatus ?? data.status
+        if (data.txid && status) applyStatus(data.txid, status)
+      } catch (err) {
+        console.error('[blast-sse] parse error', err, e.data)
+      }
+    })
+    es.onmessage = (e) => {
+      console.log('[blast-sse] default-message', e.data)
+    }
+    es.addEventListener('error', () => {
+      console.warn('[blast-sse] error/dropped after', eventCount, 'events')
+      addLog({ type: 'info', msg: `Blast SSE error · received ${eventCount} events so far` })
+    })
+  }
+
+  function closeBlastSSE() {
+    if (blastSseRef.current) { blastSseRef.current.close(); blastSseRef.current = null }
+  }
+
   function handleStartBlast() {
     if (!setupTxid || phase === 'blasting') {
       addLog({ type: 'info', msg: 'setupTxid: ' + setupTxid + ' phase: ' + phase })
@@ -254,6 +323,9 @@ export default function App() {
 
     setPhase('blasting')
     tpsCounterRef.current = { count: 0, lastTime: Date.now() }
+    const arcUrl = hostUrl.replace(/\/$/, '')
+    const callbackToken = crypto.randomUUID()
+    openBlastSSE(arcUrl, callbackToken)
     addLog({ type: 'info', msg: `Blast start — ${rate} TPS · batch ${batch} · interval ${intervalMs}ms · from vout ${nextVout}` })
 
     const BlastWorker = new Worker(new URL('./blastWorker.js', import.meta.url), { type: 'module' })
@@ -261,7 +333,7 @@ export default function App() {
 
     BlastWorker.onmessage = ({ data }) => {
       if (data.type === 'batch') {
-        const { results, nextVout: nv, txCount } = data
+        const { txids, nextVout: nv, txCount } = data
         setNextVout(nv)
         savePersist({ ...loadPersist(), nextVout: nv })
 
@@ -276,30 +348,32 @@ export default function App() {
 
         setStats(s => ({ ...s, sent: s.sent + txCount, batches: s.batches + 1 }))
 
-        if (Array.isArray(results) && results.length > 0) {
-          const sample = results[0]
-          addLog({
-            type: 'blast',
-            txid: sample.txid,
-            status: sample.txStatus ?? sample.status ?? 'SENT',
-            msg: `batch ${txCount} txs (vout ${data.batchStartVout}–${nv - 1})`
-          })
-        } else {
-          addLog({ type: 'blast', msg: `batch ${txCount} txs (vout ${data.batchStartVout}–${nv - 1})` })
+        if (Array.isArray(txids)) {
+          for (const txid of txids) {
+            allTxidsRef.current.push(txid)
+            addLog({ type: 'blast', txid, status: 'SENT' })
+          }
         }
       }
 
       if (data.type === 'batch_error') {
-        const { error, txCount, nextVout: nv } = data
+        const { error, txids, txCount, nextVout: nv } = data
         setNextVout(nv)
         savePersist({ ...loadPersist(), nextVout: nv })
         setStats(s => ({ ...s, errors: s.errors + txCount }))
-        addLog({ type: 'error', msg: `Batch error (${txCount} txs): ${error}` })
+        if (Array.isArray(txids)) {
+          for (const txid of txids) {
+            allTxidsRef.current.push(txid)
+            addLog({ type: 'error', txid, msg: error })
+          }
+        } else {
+          addLog({ type: 'error', msg: `Batch error (${txCount} txs): ${error}` })
+        }
       }
 
       if (data.type === 'done') {
         setPhase('ready')
-        addLog({ type: 'info', msg: `Blast done — ${data.reason}` })
+        addLog({ type: 'info', msg: `Blast done — ${data.reason} · SSE staying open for status updates` })
         BlastWorker.terminate()
         workerRef.current = null
       }
@@ -312,7 +386,7 @@ export default function App() {
 
     BlastWorker.postMessage({
       type: 'start',
-      hostUrl: hostUrl.replace(/\/$/, ''),
+      hostUrl: arcUrl,
       setupTxid,
       setupOutputCount,
       satoshisPerOutput: setupSatoshisPerOutput,
@@ -320,7 +394,8 @@ export default function App() {
       batchSize: batch,
       intervalMs,
       wif: wifKey.trim(),
-      address
+      address,
+      callbackToken
     })
   }
 
@@ -331,6 +406,7 @@ export default function App() {
         if (workerRef.current) { workerRef.current.terminate(); workerRef.current = null }
         setPhase('ready')
         addLog({ type: 'info', msg: 'Blast aborted' })
+        closeBlastSSE()
       }, 500)
     }
   }
@@ -351,6 +427,7 @@ export default function App() {
     return () => {
       if (workerRef.current) workerRef.current.terminate()
       if (sseRef.current) sseRef.current.close()
+      if (blastSseRef.current) blastSseRef.current.close()
     }
   }, [])
 
@@ -571,7 +648,10 @@ export default function App() {
         <div className="log-pane">
           <div className="log-header">
             <span>Transaction Log</span>
-            <button className="clear-btn" onClick={clearLog}>clear</button>
+            <span style={{ display: 'flex', gap: 8 }}>
+              <button className="clear-btn" onClick={downloadTxids}>download</button>
+              <button className="clear-btn" onClick={clearLog}>clear</button>
+            </span>
           </div>
           <div className="log-entries">
             {log.length === 0 && (
@@ -579,17 +659,20 @@ export default function App() {
                 No transactions yet
               </div>
             )}
-            {log.map(entry => (
-              <div key={entry.id} className="log-entry">
-                <span className="log-time">{entry.time}</span>
-                <span className={`log-type log-type-${entry.type}`}>{entry.type}</span>
-                <span className="log-content">
-                  {entry.txid && <span className="log-txid">{shortTxid(entry.txid)} </span>}
-                  {entry.status && <span className={`log-status log-status-${entry.status}`}>{entry.status} </span>}
-                  {entry.msg && <span className="log-msg">{entry.msg}</span>}
-                </span>
-              </div>
-            ))}
+            {log.map(entry => {
+              const liveStatus = (entry.txid && txStatusMap[entry.txid]) || entry.status
+              return (
+                <div key={entry.id} className="log-entry">
+                  <span className="log-time">{entry.time}</span>
+                  <span className={`log-type log-type-${entry.type}`}>{entry.type}</span>
+                  <span className="log-content">
+                    {entry.txid && <span className="log-txid">{shortTxid(entry.txid)} </span>}
+                    {liveStatus && <span className={`log-status log-status-${liveStatus}`}>{liveStatus} </span>}
+                    {entry.msg && <span className="log-msg">{entry.msg}</span>}
+                  </span>
+                </div>
+              )
+            })}
           </div>
         </div>
       </div>{/* /body */}
