@@ -50,7 +50,7 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 
 .body {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   flex: 1;
   overflow: hidden;
 }
@@ -161,12 +161,21 @@ input:disabled { opacity: 0.4; cursor: not-allowed; }
 .stat-label { font-size: 10px; color: var(--muted); margin-top: 2px; letter-spacing: 1px; text-transform: uppercase; }
 
 .log-pane {
-  flex: 0 0 35%;
-  min-height: 180px;
+  flex: 0 0 25%;
+  min-width: 280px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border-top: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+}
+
+.sse-pane {
+  flex: 0 0 25%;
+  min-width: 280px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-left: 1px solid var(--border);
 }
 
 .log-header {

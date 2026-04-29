@@ -3,9 +3,20 @@ import { PrivateKey, P2PKH, WalletClient } from '@bsv/sdk'
 import { QRCodeSVG } from 'qrcode.react'
 import { fetchUTXOs } from './woc.js'
 import { buildSetupTx } from './buildSetupTx.js'
+import SseStream from './SseStream.jsx'
 
 const PERSIST_KEY = 'blast_state'
 const WIF_KEY = 'blast_wif'
+const CALLBACK_TOKEN_KEY = 'blast_callback_token'
+
+function getOrCreateCallbackToken() {
+  let t = sessionStorage.getItem(CALLBACK_TOKEN_KEY)
+  if (!t) {
+    t = crypto.randomUUID()
+    sessionStorage.setItem(CALLBACK_TOKEN_KEY, t)
+  }
+  return t
+}
 
 function ts() {
   return new Date().toLocaleTimeString('en', { hour12: false })
@@ -57,18 +68,13 @@ export default function App() {
 
   const [log, setLog] = useState([])
   const [stats, setStats] = useState({ sent: 0, errors: 0, batches: 0, tps: 0 })
-  const [txStatusMap, setTxStatusMap] = useState({})
+
+  const callbackTokenRef = useRef(null)
+  if (callbackTokenRef.current === null) callbackTokenRef.current = getOrCreateCallbackToken()
 
   const workerRef = useRef(null)
-  const sseRef = useRef(null)
-  const blastSseRef = useRef(null)
   const tpsCounterRef = useRef({ count: 0, lastTime: Date.now() })
   const allTxidsRef = useRef([])
-
-  function applyStatus(txid, status) {
-    if (!txid || !status) return
-    setTxStatusMap(prev => prev[txid] === status ? prev : { ...prev, [txid]: status })
-  }
 
   // Derive address from WIF + network
   const { address, keyError } = useMemo(() => {
@@ -100,7 +106,6 @@ export default function App() {
   function clearLog() {
     setLog([])
     allTxidsRef.current = []
-    setTxStatusMap({})
   }
 
   function downloadTxids() {
@@ -126,8 +131,6 @@ export default function App() {
     setSetupStatus('')
     setSetupError('')
     setUtxos(null)
-    if (sseRef.current) { sseRef.current.close(); sseRef.current = null }
-    if (blastSseRef.current) { blastSseRef.current.close(); blastSseRef.current = null }
   }
 
   async function handleFundViaWallet() {
@@ -186,7 +189,7 @@ export default function App() {
         satoshisPerOutput: parseInt(satoshisPerOutput)
       })
 
-      const callbackToken = crypto.randomUUID()
+      const callbackToken = callbackTokenRef.current
       const arcUrl = hostUrl.replace(/\/$/, '')
 
       setSetupStatus('Broadcasting…')
@@ -219,93 +222,11 @@ export default function App() {
       addLog({ type: 'setup', txid, status: result.txStatus ?? 'BROADCAST', msg: `Setup tx · ${count} outputs` })
       setSetupStatus(`Ready — ${count} outputs available`)
       setPhase('ready')
-
-      openSSE(arcUrl, callbackToken, txid, count)
     } catch (err) {
       setSetupError(err.message)
       setPhase('idle')
       setSetupStatus('')
     }
-  }
-
-  function openSSE(arcUrl, callbackToken, expectedTxid, count) {
-    if (sseRef.current) { sseRef.current.close(); sseRef.current = null }
-
-    let es
-    try {
-      es = new EventSource(`${arcUrl}/events?callbackToken=${encodeURIComponent(callbackToken)}`)
-    } catch {
-      setSetupStatus('SSE unavailable — status updates disabled.')
-      return
-    }
-
-    sseRef.current = es
-
-    es.addEventListener('status', (e) => {
-      try {
-        const data = JSON.parse(e.data)
-        const status = data.txStatus ?? data.status ?? 'UPDATE'
-        const txid = data.txid ?? expectedTxid
-        applyStatus(txid, status)
-        setSetupStatus(`Status: ${status}`)
-        if (status === 'SEEN_ON_NETWORK' || status === 'MINED') {
-          setSetupStatus(`Confirmed: ${status} — ${count} outputs available`)
-          es.close(); sseRef.current = null
-          addLog({ type: 'success', msg: `Setup confirmed: ${status}` })
-        }
-      } catch {}
-    })
-
-    es.addEventListener('error', () => {
-      setSetupStatus('SSE dropped — status updates stopped.')
-      es.close(); sseRef.current = null
-    })
-
-    setTimeout(() => {
-      if (sseRef.current === es) {
-        setSetupStatus('SSE timeout — status updates stopped.')
-        es.close(); sseRef.current = null
-      }
-    }, 60_000)
-  }
-
-  function openBlastSSE(arcUrl, callbackToken) {
-    if (blastSseRef.current) { blastSseRef.current.close(); blastSseRef.current = null }
-    let es
-    try {
-      es = new EventSource(`${arcUrl}/events?callbackToken=${encodeURIComponent(callbackToken)}`)
-    } catch {
-      addLog({ type: 'error', msg: 'Blast SSE unavailable — live status disabled' })
-      return
-    }
-    blastSseRef.current = es
-    let eventCount = 0
-    es.onopen = () => {
-      console.log('[blast-sse] open', { url: `${arcUrl}/events`, token: callbackToken })
-      addLog({ type: 'info', msg: `Blast SSE open · token ${callbackToken.slice(0, 8)}…` })
-    }
-    es.addEventListener('status', (e) => {
-      eventCount++
-      try {
-        const data = JSON.parse(e.data)
-        console.log('[blast-sse] status', data)
-        const status = data.txStatus ?? data.status
-        if (data.txid && status) applyStatus(data.txid, status)
-      } catch (err) {
-        console.error('[blast-sse] parse error', err, e.data)
-      }
-    })
-    es.onmessage = (e) => {
-      console.log('[blast-sse] default-message', e.data)
-    }
-    es.addEventListener('error', () => {
-      console.warn('[blast-sse] error/dropped after', eventCount, 'events')
-      addLog({ type: 'info', msg: `Blast SSE error · received ${eventCount} events so far` })
-    })
-  }
-
-  function closeBlastSSE() {
-    if (blastSseRef.current) { blastSseRef.current.close(); blastSseRef.current = null }
   }
 
   function handleStartBlast() {
@@ -324,8 +245,7 @@ export default function App() {
     setPhase('blasting')
     tpsCounterRef.current = { count: 0, lastTime: Date.now() }
     const arcUrl = hostUrl.replace(/\/$/, '')
-    const callbackToken = crypto.randomUUID()
-    openBlastSSE(arcUrl, callbackToken)
+    const callbackToken = callbackTokenRef.current
     addLog({ type: 'info', msg: `Blast start — ${rate} TPS · batch ${batch} · interval ${intervalMs}ms · from vout ${nextVout}` })
 
     const BlastWorker = new Worker(new URL('./blastWorker.js', import.meta.url), { type: 'module' })
@@ -373,7 +293,7 @@ export default function App() {
 
       if (data.type === 'done') {
         setPhase('ready')
-        addLog({ type: 'info', msg: `Blast done — ${data.reason} · SSE staying open for status updates` })
+        addLog({ type: 'info', msg: `Blast done — ${data.reason}` })
         BlastWorker.terminate()
         workerRef.current = null
       }
@@ -406,7 +326,6 @@ export default function App() {
         if (workerRef.current) { workerRef.current.terminate(); workerRef.current = null }
         setPhase('ready')
         addLog({ type: 'info', msg: 'Blast aborted' })
-        closeBlastSSE()
       }, 500)
     }
   }
@@ -426,8 +345,6 @@ export default function App() {
   useEffect(() => {
     return () => {
       if (workerRef.current) workerRef.current.terminate()
-      if (sseRef.current) sseRef.current.close()
-      if (blastSseRef.current) blastSseRef.current.close()
     }
   }, [])
 
@@ -659,22 +576,21 @@ export default function App() {
                 No transactions yet
               </div>
             )}
-            {log.map(entry => {
-              const liveStatus = (entry.txid && txStatusMap[entry.txid]) || entry.status
-              return (
-                <div key={entry.id} className="log-entry">
-                  <span className="log-time">{entry.time}</span>
-                  <span className={`log-type log-type-${entry.type}`}>{entry.type}</span>
-                  <span className="log-content">
-                    {entry.txid && <span className="log-txid">{shortTxid(entry.txid)} </span>}
-                    {liveStatus && <span className={`log-status log-status-${liveStatus}`}>{liveStatus} </span>}
-                    {entry.msg && <span className="log-msg">{entry.msg}</span>}
-                  </span>
-                </div>
-              )
-            })}
+            {log.map(entry => (
+              <div key={entry.id} className="log-entry">
+                <span className="log-time">{entry.time}</span>
+                <span className={`log-type log-type-${entry.type}`}>{entry.type}</span>
+                <span className="log-content">
+                  {entry.txid && <span className="log-txid">{shortTxid(entry.txid)} </span>}
+                  {entry.status && <span className={`log-status log-status-${entry.status}`}>{entry.status} </span>}
+                  {entry.msg && <span className="log-msg">{entry.msg}</span>}
+                </span>
+              </div>
+            ))}
           </div>
         </div>
+
+        <SseStream arcUrl={hostUrl.replace(/\/$/, '')} callbackToken={callbackTokenRef.current} />
       </div>{/* /body */}
     </div>
   )
