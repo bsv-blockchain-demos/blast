@@ -80,4 +80,4 @@ Broadcast requests include `X-CallbackToken` to associate them with the status s
 
 ## Licence
 
-No licence file is currently included in this repository.
+**Open BSV Licence v6.** See [LICENSE.txt](LICENSE.txt) for the full terms. The licence applies to this project's original code and documentation and restricts use to the BSV blockchain defined in the licence. Third-party code, assets and referenced standards retain their respective terms.
