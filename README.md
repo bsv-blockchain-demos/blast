@@ -58,11 +58,11 @@ The default host is `https://arcade-v2-us-1.bsvblockchain.tech`. The target serv
 | `POST /txs` | Submit concatenated Extended Format transactions as a batch. |
 | `GET /events?callbackToken=...` | Receive transaction status events. |
 
-Broadcast requests include `X-CallbackToken` to associate them with the status stream. Configuration is entered in the interface; no environment file is required.
+Broadcast requests include `X-CallbackToken` to associate them with the status stream. If **API Key** is set, `POST /tx` and `POST /txs` also send `Authorization: Bearer <key>`. The status stream uses `EventSource`, which cannot send custom headers, so `GET /events` is not authenticated by the key. Configuration is entered in the interface; no environment file is required.
 
 ## Operational notes
 
-- The WIF private key is stored unencrypted in browser `localStorage`. Setup progress is also stored locally; the callback token is stored in `sessionStorage`.
+- The WIF private key and API key are stored unencrypted in browser `localStorage`. Setup progress is also stored locally; the callback token is stored in `sessionStorage`.
 - **Reset Setup** clears saved setup progress while retaining the stored key. Clearing browser storage can remove the only local copy of a generated key, so preserve it first if the address still holds funds.
 - Target TPS controls batch pacing. Signing time and request latency also affect the achieved rate.
 - A successful HTTP response increments the sent count. Use the status stream or a transaction lookup to check acceptance and confirmation.
