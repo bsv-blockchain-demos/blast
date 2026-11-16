@@ -8,6 +8,7 @@ import { TxidCopy } from './Txid.jsx'
 
 const PERSIST_KEY = 'blast_state'
 const WIF_KEY = 'blast_wif'
+const API_KEY_KEY = 'blast_api_key'
 const CALLBACK_TOKEN_KEY = 'blast_callback_token'
 
 function getOrCreateCallbackToken() {
@@ -44,8 +45,20 @@ function saveWif(wif) {
   try { localStorage.setItem(WIF_KEY, wif) } catch {}
 }
 
+function loadApiKey() {
+  try { return localStorage.getItem(API_KEY_KEY) ?? '' } catch { return '' }
+}
+
+function saveApiKey(apiKey) {
+  try {
+    if (apiKey) localStorage.setItem(API_KEY_KEY, apiKey)
+    else localStorage.removeItem(API_KEY_KEY)
+  } catch {}
+}
+
 export default function App() {
   const [hostUrl, setHostUrl] = useState(() => loadPersist().hostUrl ?? 'https://arcade-v2-us-1.bsvblockchain.tech')
+  const [apiKey, setApiKey] = useState(() => loadApiKey())
   const [wifKey, setWifKey] = useState(() => loadWif())
   const [network, setNetwork] = useState(() => loadPersist().network ?? 'main')
   const [outputCount, setOutputCount] = useState(100)
@@ -92,6 +105,10 @@ export default function App() {
   useEffect(() => {
     if (wifKey) saveWif(wifKey)
   }, [wifKey])
+
+  useEffect(() => {
+    saveApiKey(apiKey.trim())
+  }, [apiKey])
 
   function generateRandomKey() {
     const key = PrivateKey.fromRandom()
@@ -195,12 +212,14 @@ export default function App() {
 
       setSetupStatus('Broadcasting…')
 
+      const headers = {
+        'Content-Type': 'application/octet-stream',
+        'X-CallbackToken': callbackToken
+      }
+      if (apiKey.trim()) headers.Authorization = `Bearer ${apiKey.trim()}`
       const broadcastRes = await fetch(`${arcUrl}/tx`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/octet-stream',
-          'X-CallbackToken': callbackToken
-        },
+        headers,
         body: new Uint8Array(tx.toEF()),
         signal: AbortSignal.timeout(3_000)
       })
@@ -316,7 +335,8 @@ export default function App() {
       intervalMs,
       wif: wifKey.trim(),
       address,
-      callbackToken
+      callbackToken,
+      apiKey: apiKey.trim()
     })
   }
 
@@ -437,6 +457,17 @@ export default function App() {
                   value={hostUrl}
                   onChange={e => setHostUrl(e.target.value)}
                   placeholder="http://arcade.example.com"
+                  disabled={phase === 'blasting'}
+                />
+              </div>
+              <div className="field">
+                <label>API Key</label>
+                <input
+                  type="password"
+                  value={apiKey}
+                  onChange={e => setApiKey(e.target.value)}
+                  placeholder="Optional — sent as Authorization: Bearer"
+                  autoComplete="off"
                   disabled={phase === 'blasting'}
                 />
               </div>

@@ -40,10 +40,11 @@ async function buildBlastTx(setupTxid, vout, satoshisPerOutput) {
   return tx
 }
 
-async function broadcastBatch(hostUrl, txs, callbackToken) {
+async function broadcastBatch(hostUrl, txs, callbackToken, apiKey) {
   const rawTxs = txs.map(tx => tx.toEF())
   const headers = { 'Content-Type': 'application/octet-stream' }
   if (callbackToken) headers['X-CallbackToken'] = callbackToken
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`
   const res = await fetch(`${hostUrl}/txs`, {
     method: 'POST',
     headers,
@@ -69,7 +70,7 @@ self.onmessage = async ({ data }) => {
 
   if (data.type !== 'start') return
 
-  const { hostUrl, setupTxid, setupOutputCount, satoshisPerOutput, startVout, batchSize, intervalMs, wif, address, callbackToken } = data
+  const { hostUrl, setupTxid, setupOutputCount, satoshisPerOutput, startVout, batchSize, intervalMs, wif, address, callbackToken, apiKey } = data
   aborted = false
   setupHashBytes = null
   workerP2PKH = new P2PKH()
@@ -96,7 +97,7 @@ self.onmessage = async ({ data }) => {
     nextVout = batchEnd
 
     try {
-      const results = await broadcastBatch(hostUrl, txs, callbackToken)
+      const results = await broadcastBatch(hostUrl, txs, callbackToken, apiKey)
       if (!aborted) {
         self.postMessage({
           type: 'batch',
