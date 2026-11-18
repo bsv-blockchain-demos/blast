@@ -56,11 +56,22 @@ function saveApiKey(apiKey) {
   } catch {}
 }
 
+const DEFAULT_HOST_URLS = {
+  main: 'https://broadcast.whatsonchain.com/',
+  test: 'https://broadcast.whatsonchain.com/testnet/',
+}
+const LEGACY_DEFAULT_HOST_URL = 'https://arcade-v2-us-1.bsvblockchain.tech'
+
+function isDefaultHostUrl(url) {
+  const trimmed = url.trim()
+  return !trimmed || trimmed === LEGACY_DEFAULT_HOST_URL || Object.values(DEFAULT_HOST_URLS).includes(trimmed)
+}
+
 export default function App() {
-  const [hostUrl, setHostUrl] = useState(() => loadPersist().hostUrl ?? 'https://arcade-v2-us-1.bsvblockchain.tech')
+  const [network, setNetwork] = useState(() => loadPersist().network ?? 'main')
+  const [hostUrl, setHostUrl] = useState(() => loadPersist().hostUrl ?? DEFAULT_HOST_URLS[loadPersist().network ?? 'main'])
   const [apiKey, setApiKey] = useState(() => loadApiKey())
   const [wifKey, setWifKey] = useState(() => loadWif())
-  const [network, setNetwork] = useState(() => loadPersist().network ?? 'main')
   const [outputCount, setOutputCount] = useState(100)
   const [satoshisPerOutput, setSatoshisPerOutput] = useState(() => loadPersist().satoshisPerOutput ?? 24)
   const [fundAmount, setFundAmount] = useState(10000)
@@ -138,6 +149,12 @@ export default function App() {
     a.click()
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
+  }
+
+  // Autofill the host for the selected network unless the user has entered a custom one.
+  function changeNetwork(next) {
+    setNetwork(next)
+    if (isDefaultHostUrl(hostUrl)) setHostUrl(DEFAULT_HOST_URLS[next])
   }
 
   function resetSetup() {
@@ -473,7 +490,7 @@ export default function App() {
               </div>
               <div className="field">
                 <label>Network</label>
-                <select value={network} onChange={e => setNetwork(e.target.value)} disabled={phase === 'blasting'}>
+                <select value={network} onChange={e => changeNetwork(e.target.value)} disabled={phase === 'blasting'}>
                   <option value="main">Mainnet</option>
                   <option value="test">Testnet</option>
                 </select>
